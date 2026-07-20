@@ -8,6 +8,7 @@ Return to the [manual test index](../../tests.md).
 
 | Section |
 | --- |
+| [Feature: Thread goal mode](thread-goal-mode.md) |
 | [Codex thread deep links render as local web thread URLs](codex-thread-deep-links-render-as-local-web-thread-urls.md) |
 | [Bold-wrapped Markdown links render without literal markers](bold-wrapped-markdown-links-render-without-literal-markers.md) |
 | [Composer expands long drafts to full screen](composer-expands-long-drafts-to-full-screen.md) |
