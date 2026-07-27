@@ -12,12 +12,14 @@
 3. Open the text-file link and confirm the request returns the existing file instead of a 404 response.
 4. Open the MP4 link and seek within the video.
 5. Inspect the MP4 request and confirm byte-range requests return `206 Partial Content` with `Accept-Ranges: bytes`.
+6. Open a directory through local browse and click a nested folder plus the parent (`..`) link.
 
 ## Expected Results
 
 - Windows drive paths are decoded as `C:/...`, not `/C:/...` or `C:\\C:\\...`.
 - Existing files return successfully through `/codex-local-browse/C:/...`.
 - MP4 files use the correct media content type and support browser range requests.
+- Directory, parent, and edit links use `/codex-local-browse/C:/...` or `/codex-local-edit/C:/...` with forward slashes and a separator after the route prefix.
 - Unix absolute paths and UNC paths retain their existing behavior.
 
 ## Rollback / Cleanup
