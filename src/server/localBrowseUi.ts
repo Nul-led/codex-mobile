@@ -141,16 +141,21 @@ function normalizeNewProjectName(value: string): string {
   return value.trim().replace(/[\\/]+/gu, '').trim()
 }
 
-function toBrowseHref(pathValue: string, newProjectName = ''): string {
-  const normalizedName = normalizeNewProjectName(newProjectName)
-  const query = normalizedName ? `?newProjectName=${encodeURIComponent(normalizedName)}` : ''
-  return `/codex-local-browse${encodeURI(pathValue)}${query}`
+function normalizeLocalRoutePath(pathValue: string): string {
+  const normalized = pathValue.replace(/\\/gu, '/')
+  return normalized.startsWith('/') ? normalized : `/${normalized}`
 }
 
-function toEditHref(pathValue: string, newProjectName = ''): string {
+export function toBrowseHref(pathValue: string, newProjectName = ''): string {
   const normalizedName = normalizeNewProjectName(newProjectName)
   const query = normalizedName ? `?newProjectName=${encodeURIComponent(normalizedName)}` : ''
-  return `/codex-local-edit${encodeURI(pathValue)}${query}`
+  return `/codex-local-browse${encodeURI(normalizeLocalRoutePath(pathValue))}${query}`
+}
+
+export function toEditHref(pathValue: string, newProjectName = ''): string {
+  const normalizedName = normalizeNewProjectName(newProjectName)
+  const query = normalizedName ? `?newProjectName=${encodeURIComponent(normalizedName)}` : ''
+  return `/codex-local-edit${encodeURI(normalizeLocalRoutePath(pathValue))}${query}`
 }
 
 function escapeForInlineScriptString(value: string): string {
