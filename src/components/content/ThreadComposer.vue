@@ -104,7 +104,7 @@
         >
           <div class="thread-composer-slash-heading">
             <span>Slash commands</span>
-            <span>Goal mode</span>
+            <span>Codex</span>
           </div>
           <button
             v-for="(option, index) in slashCommandSuggestions"
@@ -127,11 +127,11 @@
           </button>
           <div class="thread-composer-slash-help">↑↓ Navigate · Tab select · Esc close</div>
         </div>
-        <div v-else-if="isGoalCommandPreviewOpen && goalCommandPreview" class="thread-composer-command-preview" role="status">
+        <div v-else-if="isSlashCommandPreviewOpen && slashCommandPreview" class="thread-composer-command-preview" role="status">
           <span class="thread-composer-slash-icon" aria-hidden="true">◎</span>
           <span class="thread-composer-slash-copy">
-            <span class="thread-composer-slash-title"><strong>{{ goalCommandPreview.label }}</strong></span>
-            <span class="thread-composer-slash-description">{{ goalCommandPreview.description }}</span>
+            <span class="thread-composer-slash-title"><strong>{{ slashCommandPreview.label }}</strong></span>
+            <span class="thread-composer-slash-description">{{ slashCommandPreview.description }}</span>
           </span>
           <kbd>Enter</kbd>
         </div>
@@ -444,10 +444,10 @@ import { useDictation } from '../../composables/useDictation'
 import { useMobile } from '../../composables/useMobile'
 import { useUiLanguage } from '../../composables/useUiLanguage'
 import {
-  describeGoalCommand,
-  getGoalCommandSuggestions,
-  type GoalCommandOption,
-} from '../../utils/goalCommand'
+  describeSlashCommand,
+  getSlashCommandSuggestions,
+  type SlashCommandOption,
+} from '../../utils/slashCommand'
 import {
   createComposerPrompt,
   getComposerPrompts,
@@ -631,19 +631,19 @@ const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.
 const DRAFT_STORAGE_PREFIX = 'codex-web-local.thread-draft.v1.'
 let lastActiveThreadId = ''
 
-const slashCommandSuggestions = computed(() => getGoalCommandSuggestions(draft.value))
-const goalCommandPreview = computed(() => describeGoalCommand(draft.value))
+const slashCommandSuggestions = computed(() => getSlashCommandSuggestions(draft.value))
+const slashCommandPreview = computed(() => describeSlashCommand(draft.value))
 const isSlashCommandDismissed = computed(() => dismissedSlashCommandDraft.value === draft.value)
 const isSlashCommandMenuOpen = computed(() =>
   !isFileMentionOpen.value
   && !isSlashCommandDismissed.value
   && slashCommandSuggestions.value.length > 0,
 )
-const isGoalCommandPreviewOpen = computed(() =>
+const isSlashCommandPreviewOpen = computed(() =>
   !isFileMentionOpen.value
   && !isSlashCommandDismissed.value
   && slashCommandSuggestions.value.length === 0
-  && goalCommandPreview.value !== null,
+  && slashCommandPreview.value !== null,
 )
 
 const reasoningOptions: Array<{ value: ReasoningEffort; label: string }> = [
@@ -1637,8 +1637,9 @@ function onInputKeydown(event: KeyboardEvent): void {
     if (event.key === 'Enter') {
       const selected = slashCommandSuggestions.value[slashCommandHighlightedIndex.value]
       const normalizedDraft = draft.value.trim()
-      const isRunnableExact = draft.value === '/goal'
-        || (selected?.requiresArgument === false && selected.insertText.trim() === normalizedDraft)
+      const exactOption = describeSlashCommand(normalizedDraft)
+      const isRunnableExact = exactOption?.requiresArgument === false
+        && exactOption.insertText.trim() === normalizedDraft
       if (!isRunnableExact) {
         event.preventDefault()
         if (selected) applySlashCommandOption(selected)
@@ -1691,7 +1692,7 @@ function onInputKeydown(event: KeyboardEvent): void {
   }
 }
 
-function applySlashCommandOption(option: GoalCommandOption): void {
+function applySlashCommandOption(option: SlashCommandOption): void {
   draft.value = option.insertText
   dismissedSlashCommandDraft.value = option.insertText
   slashCommandHighlightedIndex.value = 0

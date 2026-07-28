@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearThreadGoal,
+  compactThread,
   getAvailableModelIds,
   getThreadDetail,
   getThreadGoal,
@@ -105,6 +106,22 @@ describe('thread goal RPCs', () => {
       { method: 'thread/goal/get', params: { threadId: 'thread-1' } },
       { method: 'thread/goal/set', params: { threadId: 'thread-1', status: 'paused' } },
       { method: 'thread/goal/clear', params: { threadId: 'thread-1' } },
+    ])
+  })
+})
+
+describe('thread compaction RPC', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('starts app-server compaction for the selected thread', async () => {
+    const { requests } = mockRpcFetch()
+
+    await compactThread('thread-compact')
+
+    expect(requests).toEqual([
+      { method: 'thread/compact/start', params: { threadId: 'thread-compact' } },
     ])
   })
 })

@@ -7,7 +7,7 @@
 
 ## Steps
 
-1. Type `/` and confirm the composer shows all six Goal commands with syntax and descriptions.
+1. Type `/` and confirm the composer shows all six Goal commands plus the supported Codex commands: Plan, Review, Compact, Model, Rename, Fork, and Archive.
 2. Use Arrow Up/Down to change the highlighted command, Tab to complete it, and Escape to dismiss the menu.
 3. Type `/goal pa` and confirm the list filters to **Pause goal**; press Tab and confirm the composer contains `/goal pause` without submitting it.
 4. Type `/goal Ship the goal-mode feature with tests` and confirm the picker becomes a **Start a goal** execution preview.
@@ -25,6 +25,7 @@
 - Goal state is persisted by app-server, restored when selecting or reloading the thread, and updated immediately by goal notifications.
 - Goal commands are handled as controls rather than ordinary chat messages.
 - The slash picker makes Goal mode discoverable before submission and filters as a command prefix is typed.
+- Codex commands execute through their native app-server actions; command text is not sent to the model as an ordinary prompt.
 - Commands that require an objective complete their syntax instead of submitting an incomplete command.
 - Goal loading is cached per thread; notifications update local state without triggering a thread-list or message reload.
 - CodexApp does not issue a duplicate `turn/start`; app-server owns the autonomous goal loop.

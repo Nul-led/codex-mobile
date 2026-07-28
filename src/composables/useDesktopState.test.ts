@@ -13,6 +13,7 @@ import type { WorkspaceRootsState } from '../api/codexGateway'
 
 const gatewayMocks = vi.hoisted(() => ({
   archiveThread: vi.fn(),
+  compactThread: vi.fn(),
   forkThread: vi.fn(),
   getAccountRateLimits: vi.fn(),
   getAvailableCollaborationModes: vi.fn(),
@@ -40,6 +41,7 @@ const gatewayMocks = vi.hoisted(() => ({
   clearThreadGoal: vi.fn(),
   setWorkspaceRootsState: vi.fn(),
   startThread: vi.fn(),
+  startThreadReview: vi.fn(),
   startThreadTurn: vi.fn(),
   subscribeCodexNotifications: vi.fn(),
 }))
@@ -678,6 +680,50 @@ describe('thread goals', () => {
       status: 'active',
     })
     expect(gatewayMocks.startThreadTurn).not.toHaveBeenCalled()
+  })
+
+  it('executes Codex slash commands through native app-server methods', async () => {
+    installTestWindow()
+    gatewayMocks.compactThread.mockResolvedValue(undefined)
+    gatewayMocks.startThreadReview.mockResolvedValue(undefined)
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-goal')
+
+    await state.sendMessageToSelectedThread('/compact')
+    await state.sendMessageToSelectedThread('/review')
+    await state.sendMessageToSelectedThread('/rename Release prep')
+
+    expect(gatewayMocks.compactThread).toHaveBeenCalledWith('thread-goal')
+    expect(gatewayMocks.startThreadReview).toHaveBeenCalledWith(
+      'thread-goal',
+      'workspace',
+      'unstaged',
+    )
+    expect(gatewayMocks.renameThread).toHaveBeenCalledWith('thread-goal', 'Release prep')
+    expect(gatewayMocks.startThreadTurn).not.toHaveBeenCalled()
+  })
+
+  it('strips /plan and starts the turn in Plan mode', async () => {
+    installTestWindow()
+    gatewayMocks.resumeThread.mockResolvedValue({
+      model: 'gpt-5.4',
+      modelProvider: 'openai',
+      messages: [],
+      inProgress: false,
+      activeTurnId: '',
+      hasMoreOlder: false,
+      turnIndexByTurnId: {},
+    })
+    gatewayMocks.startThreadTurn.mockResolvedValue({ id: 'turn-plan' })
+
+    const state = useDesktopState()
+    state.primeSelectedThread('thread-goal')
+    await state.sendMessageToSelectedThread('/plan Design the migration')
+
+    expect(gatewayMocks.startThreadTurn).toHaveBeenCalled()
+    expect(gatewayMocks.startThreadTurn.mock.calls[0]?.[1]).toBe('Design the migration')
+    expect(gatewayMocks.startThreadTurn.mock.calls[0]?.[7]).toBe('plan')
   })
 })
 

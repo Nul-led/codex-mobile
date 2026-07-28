@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import {
 
   archiveThread,
+  compactThread,
   forkThread,
   getAvailableCollaborationModes,
   getAccountRateLimits,
@@ -34,6 +35,7 @@ import {
   resumeThread,
 
   startThread,
+  startThreadReview,
   subscribeCodexNotifications,
   startThreadTurn,
   type RpcNotification,
@@ -65,7 +67,8 @@ import type {
   UiThread,
 } from '../types/codex'
 import { getPathParent, isProjectlessChatPath, normalizePathForUi, toProjectName } from '../pathUtils.js'
-import { parseGoalCommand, type GoalCommand } from '../utils/goalCommand'
+import type { GoalCommand } from '../utils/goalCommand'
+import { parseSlashCommand, type CodexSlashCommand } from '../utils/slashCommand'
 
 function flattenThreads(groups: UiProjectGroup[]): UiThread[] {
   return groups.flatMap((group) => group.threads)
@@ -4954,6 +4957,65 @@ export function useDesktopState() {
     }
   }
 
+  function resolveAvailableModelId(model: string): string {
+    const normalizedModel = model.trim().toLowerCase()
+    if (!normalizedModel) return ''
+    return availableModelIds.value.find((modelId) => modelId.toLowerCase() === normalizedModel) ?? ''
+  }
+
+  async function executeCodexControlCommand(threadId: string, command: CodexSlashCommand): Promise<boolean> {
+    if (command.action === 'plan') return false
+
+    error.value = ''
+    if (command.action === 'model') {
+      if (!command.model) {
+        error.value = 'Use /model <model>, for example /model gpt-5.4.'
+        return true
+      }
+      const modelId = resolveAvailableModelId(command.model)
+      if (!modelId) {
+        error.value = `Unknown model "${command.model}". Choose one from the model picker.`
+        return true
+      }
+      setSelectedModelIdForThread(threadId, modelId)
+      return true
+    }
+
+    if (command.action === 'rename') {
+      if (!command.name) {
+        error.value = 'Use /rename <name>.'
+        return true
+      }
+      await renameThreadById(threadId, command.name)
+      return true
+    }
+
+    if (inProgressById.value[threadId] === true) {
+      error.value = `Finish the current turn before running /${command.action}.`
+      return true
+    }
+
+    if (command.action === 'fork') {
+      await forkThreadById(threadId)
+      return true
+    }
+    if (command.action === 'archive') {
+      await archiveThreadById(threadId)
+      return true
+    }
+
+    try {
+      if (command.action === 'compact') {
+        await compactThread(threadId)
+      } else {
+        await startThreadReview(threadId, 'workspace', 'unstaged')
+      }
+    } catch (unknownError) {
+      error.value = unknownError instanceof Error ? unknownError.message : `Failed to run /${command.action}`
+    }
+    return true
+  }
+
   async function maybeReplyToPendingUserInputRequest(
     threadId: string,
     text: string,
@@ -4996,15 +5058,26 @@ export function useDesktopState() {
     if (isUpdatingSpeedMode.value) return
 
     const threadId = selectedThreadId.value
-    const nextText = text.trim()
+    let nextText = text.trim()
+    let effectiveCollaborationModeOverride = collaborationModeOverride
     if (!threadId || (!nextText && imageUrls.length === 0 && fileAttachments.length === 0)) return
 
-    const goalCommand = imageUrls.length === 0 && skills.length === 0 && fileAttachments.length === 0
-      ? parseGoalCommand(nextText)
+    const slashCommand = imageUrls.length === 0 && skills.length === 0 && fileAttachments.length === 0
+      ? parseSlashCommand(nextText)
       : null
-    if (goalCommand) {
-      await executeGoalCommand(threadId, goalCommand)
+    if (slashCommand?.kind === 'goal') {
+      await executeGoalCommand(threadId, slashCommand.command)
       return
+    }
+    if (slashCommand?.kind === 'codex') {
+      if (slashCommand.command.action === 'plan') {
+        setSelectedCollaborationModeForThread(threadId, 'plan')
+        if (!slashCommand.command.prompt) return
+        nextText = slashCommand.command.prompt
+        effectiveCollaborationModeOverride = 'plan'
+      } else if (await executeCodexControlCommand(threadId, slashCommand.command)) {
+        return
+      }
     }
 
     if (await maybeReplyToPendingUserInputRequest(threadId, nextText, imageUrls, skills, fileAttachments)) {
@@ -5026,9 +5099,9 @@ export function useDesktopState() {
         imageUrls,
         skills,
         fileAttachments,
-        collaborationMode: collaborationModeOverride === 'plan'
+        collaborationMode: effectiveCollaborationModeOverride === 'plan'
           ? 'plan'
-          : collaborationModeOverride === 'default'
+          : effectiveCollaborationModeOverride === 'default'
             ? 'default'
             : selectedCollaborationMode.value,
       })
@@ -5048,7 +5121,7 @@ export function useDesktopState() {
         imageUrls,
         skills,
         fileAttachments,
-        collaborationModeOverride,
+        effectiveCollaborationModeOverride,
       ).catch((unknownError) => {
         const errorMessage = unknownError instanceof Error ? unknownError.message : 'Unknown application error'
         setTurnErrorForThread(threadId, errorMessage)
@@ -5067,9 +5140,9 @@ export function useDesktopState() {
         details: buildPendingTurnDetails(
           readModelIdForThread(threadId),
           selectedReasoningEffort.value,
-          collaborationModeOverride === 'plan'
+          effectiveCollaborationModeOverride === 'plan'
             ? 'plan'
-            : collaborationModeOverride === 'default'
+            : effectiveCollaborationModeOverride === 'default'
               ? 'default'
               : selectedCollaborationMode.value,
         ),
@@ -5085,7 +5158,7 @@ export function useDesktopState() {
         imageUrls,
         skills,
         fileAttachments,
-        collaborationModeOverride,
+        effectiveCollaborationModeOverride,
       )
     } catch (unknownError) {
       shouldAutoScrollOnNextAgentEvent = false
@@ -5109,18 +5182,44 @@ export function useDesktopState() {
 
     let nextText = text.trim()
     const targetCwd = cwd.trim()
-    const selectedModel = readModelIdForThread(NEW_THREAD_COLLABORATION_MODE_CONTEXT).trim()
-    const selectedMode = selectedCollaborationMode.value
     if (!nextText && imageUrls.length === 0 && fileAttachments.length === 0) return ''
 
-    const goalCommand = imageUrls.length === 0 && skills.length === 0 && fileAttachments.length === 0
-      ? parseGoalCommand(nextText)
+    const slashCommand = imageUrls.length === 0 && skills.length === 0 && fileAttachments.length === 0
+      ? parseSlashCommand(nextText)
       : null
-    if (goalCommand && goalCommand.action !== 'set') {
-      error.value = 'Start a goal from Home with /goal <objective>.'
-      return ''
+    const goalCommand = slashCommand?.kind === 'goal' ? slashCommand.command : null
+    if (goalCommand) {
+      if (goalCommand.action !== 'set') {
+        error.value = 'Start a goal from Home with /goal <objective>.'
+        return ''
+      }
+      nextText = goalCommand.objective
+    } else if (slashCommand?.kind === 'codex') {
+      if (slashCommand.command.action === 'plan') {
+        setSelectedCollaborationMode('plan')
+        if (!slashCommand.command.prompt) return ''
+        nextText = slashCommand.command.prompt
+      } else if (slashCommand.command.action === 'model') {
+        if (!slashCommand.command.model) {
+          error.value = 'Use /model <model>, for example /model gpt-5.4.'
+          return ''
+        }
+        const modelId = resolveAvailableModelId(slashCommand.command.model)
+        if (!modelId) {
+          error.value = `Unknown model "${slashCommand.command.model}". Choose one from the model picker.`
+          return ''
+        }
+        setSelectedModelIdForThread('', modelId)
+        error.value = ''
+        return ''
+      } else {
+        error.value = `Open a chat before running /${slashCommand.command.action}.`
+        return ''
+      }
     }
-    if (goalCommand?.action === 'set') nextText = goalCommand.objective
+
+    const selectedModel = readModelIdForThread(NEW_THREAD_COLLABORATION_MODE_CONTEXT).trim()
+    const selectedMode = selectedCollaborationMode.value
 
     isSendingMessage.value = true
     error.value = ''
