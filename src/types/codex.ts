@@ -286,6 +286,27 @@ export type UiRateLimitSnapshot = {
   planType: string | null
 }
 
+export type UiRateLimitResetCredit = {
+  id: string
+  resetType: string
+  status: string
+  grantedAt: number | null
+  expiresAt: number | null
+  title: string | null
+  description: string | null
+}
+
+export type UiRateLimitResetCredits = {
+  availableCount: number
+  credits: UiRateLimitResetCredit[] | null
+}
+
+export type UiRateLimitResetOutcome =
+  | 'reset'
+  | 'alreadyRedeemed'
+  | 'nothingToReset'
+  | 'noCredit'
+
 export type UiTokenUsageBreakdown = {
   totalTokens: number
   inputTokens: number

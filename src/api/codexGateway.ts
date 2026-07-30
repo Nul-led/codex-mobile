@@ -52,6 +52,9 @@ import type {
   UiReviewSummary,
   UiReviewWorkspaceView,
   UiRateLimitSnapshot,
+  UiRateLimitResetCredit,
+  UiRateLimitResetCredits,
+  UiRateLimitResetOutcome,
   UiRateLimitWindow,
   UiThreadAutomation,
   UiThreadAutomationStatus,
@@ -547,6 +550,73 @@ export function pickCodexRateLimitSnapshot(payload: unknown): UiRateLimitSnapsho
   if (codexBucket) return codexBucket
 
   return normalizeRateLimitSnapshot(record.rateLimits ?? record.rate_limits)
+}
+
+function normalizeRateLimitResetCredit(value: unknown): UiRateLimitResetCredit | null {
+  const record = asRecord(value)
+  if (!record) return null
+
+  const id = readString(record.id)
+  if (!id) return null
+  return {
+    id,
+    resetType: readString(record.resetType ?? record.reset_type) ?? '',
+    status: readString(record.status) ?? '',
+    grantedAt: readNumber(record.grantedAt ?? record.granted_at),
+    expiresAt: readNumber(record.expiresAt ?? record.expires_at),
+    title: readString(record.title),
+    description: readString(record.description),
+  }
+}
+
+export function pickRateLimitResetCredits(payload: unknown): UiRateLimitResetCredits | null {
+  const record = asRecord(payload)
+  const resetCredits = asRecord(record?.rateLimitResetCredits ?? record?.rate_limit_reset_credits)
+  if (!resetCredits) return null
+
+  const availableCount = readNumber(resetCredits.availableCount ?? resetCredits.available_count)
+  if (availableCount === null) return null
+  const rawCredits = resetCredits.credits
+  return {
+    availableCount: Math.max(0, Math.floor(availableCount)),
+    credits: rawCredits === null || rawCredits === undefined
+      ? null
+      : (Array.isArray(rawCredits)
+          ? rawCredits
+              .map(normalizeRateLimitResetCredit)
+              .filter((credit): credit is UiRateLimitResetCredit => credit !== null)
+          : null),
+  }
+}
+
+export function pickRateLimitSnapshots(payload: unknown): UiRateLimitSnapshot[] {
+  const record = asRecord(payload)
+  if (!record) return []
+
+  const snapshots: UiRateLimitSnapshot[] = []
+  const seen = new Set<string>()
+  const pushSnapshot = (snapshot: UiRateLimitSnapshot | null): void => {
+    if (!snapshot) return
+    const key = snapshot.limitId?.trim() || snapshot.limitName?.trim() || '__default__'
+    if (seen.has(key)) return
+    seen.add(key)
+    snapshots.push(snapshot)
+  }
+
+  pushSnapshot(normalizeRateLimitSnapshot(record.rateLimits ?? record.rate_limits))
+  const rateLimitsByLimitId = asRecord(record.rateLimitsByLimitId ?? record.rate_limits_by_limit_id)
+  if (rateLimitsByLimitId) {
+    for (const value of Object.values(rateLimitsByLimitId)) {
+      pushSnapshot(normalizeRateLimitSnapshot(value))
+    }
+  }
+  return snapshots
+}
+
+export type AccountRateLimitsState = {
+  codexSnapshot: UiRateLimitSnapshot | null
+  snapshots: UiRateLimitSnapshot[]
+  resetCredits: UiRateLimitResetCredits | null
 }
 
 async function callRpc<T>(method: string, params?: unknown): Promise<T> {
@@ -1418,6 +1488,51 @@ export async function getAccountRateLimits(): Promise<UiRateLimitSnapshot | null
   } catch (error) {
     throw normalizeCodexApiError(error, 'Failed to load account rate limits', 'account/rateLimits/read')
   }
+}
+
+export async function getAccountRateLimitsState(): Promise<AccountRateLimitsState> {
+  try {
+    const payload = await callRpc<unknown>('account/rateLimits/read')
+    return {
+      codexSnapshot: pickCodexRateLimitSnapshot(payload),
+      snapshots: pickRateLimitSnapshots(payload),
+      resetCredits: pickRateLimitResetCredits(payload),
+    }
+  } catch (error) {
+    throw normalizeCodexApiError(error, 'Failed to load account rate limits', 'account/rateLimits/read')
+  }
+}
+
+function createRateLimitResetIdempotencyKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return `codexapp-reset-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+export async function consumeRateLimitResetCredit(
+  creditId?: string,
+  idempotencyKey: string = createRateLimitResetIdempotencyKey(),
+): Promise<UiRateLimitResetOutcome> {
+  const normalizedIdempotencyKey = idempotencyKey.trim()
+  if (!normalizedIdempotencyKey) throw new Error('A reset idempotency key is required')
+  const normalizedCreditId = creditId?.trim() ?? ''
+  const params: { idempotencyKey: string; creditId?: string } = {
+    idempotencyKey: normalizedIdempotencyKey,
+  }
+  if (normalizedCreditId) params.creditId = normalizedCreditId
+
+  const result = await callRpc<unknown>('account/rateLimitResetCredit/consume', params)
+  const outcome = readString(asRecord(result)?.outcome)
+  if (
+    outcome === 'reset'
+    || outcome === 'alreadyRedeemed'
+    || outcome === 'nothingToReset'
+    || outcome === 'noCredit'
+  ) {
+    return outcome
+  }
+  throw new Error('Codex returned an unknown rate-limit reset outcome')
 }
 
 function normalizeAccountsListResult(payload: unknown): AccountsListResult {
