@@ -489,7 +489,13 @@
                 </span>
               </div>
               <div class="sidebar-settings-rate-limits">
-                <RateLimitStatus :snapshots="accountRateLimitSnapshots" />
+                <RateLimitStatus
+                  :snapshots="accountRateLimitSnapshots"
+                  :reset-credits="rateLimitResetCredits"
+                  :is-consuming-reset="isConsumingRateLimitReset"
+                  :reset-notice="rateLimitResetNotice"
+                  @consume-reset="consumeBankedRateLimitReset"
+                />
               </div>
               <div class="sidebar-settings-build-label" :aria-label="t('Worktree name and version')">
                 WT {{ worktreeName }} · v{{ appVersion }}
@@ -1448,6 +1454,9 @@ const {
   codexCliMissingError,
   installedSkills,
   accountRateLimitSnapshots,
+  rateLimitResetCredits,
+  isConsumingRateLimitReset,
+  rateLimitResetNotice,
   messages,
   hasMoreOlderMessages,
   isLoadingThreads,
@@ -1460,6 +1469,7 @@ const {
   isUpdatingSpeedMode,
   error: desktopError,
   refreshAll,
+  consumeBankedRateLimitReset,
   refreshSkills,
   selectThread,
   ensureThreadMessagesLoaded,

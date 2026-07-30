@@ -3,9 +3,10 @@ import {
 
   archiveThread,
   compactThread,
+  consumeRateLimitResetCredit,
   forkThread,
   getAvailableCollaborationModes,
-  getAccountRateLimits,
+  getAccountRateLimitsState,
   renameThread,
   getAvailableModelIds,
   getCurrentModelConfig,
@@ -60,6 +61,7 @@ import type {
   UiPlanData,
   UiPlanStep,
   UiProjectGroup,
+  UiRateLimitResetCredits,
   UiRateLimitSnapshot,
   UiServerRequest,
   UiServerRequestReply,
@@ -1488,6 +1490,9 @@ export function useDesktopState() {
 
   const installedSkills = ref<SkillInfo[]>([])
   const accountRateLimitSnapshots = ref<UiRateLimitSnapshot[]>([])
+  const rateLimitResetCredits = ref<UiRateLimitResetCredits | null>(null)
+  const isConsumingRateLimitReset = ref(false)
+  const rateLimitResetNotice = ref<{ type: 'success' | 'info' | 'error'; text: string } | null>(null)
 
   const isLoadingThreads = ref(false)
   const isLoadingMessages = ref(false)
@@ -2263,9 +2268,10 @@ export function useDesktopState() {
 
     rateLimitRefreshPromise = (async () => {
       try {
-        const snapshot = await getAccountRateLimits()
-        setCodexRateLimit(snapshot)
-        accountRateLimitSnapshots.value = snapshot ? [snapshot] : []
+        const state = await getAccountRateLimitsState()
+        setCodexRateLimit(state.codexSnapshot)
+        accountRateLimitSnapshots.value = state.snapshots
+        rateLimitResetCredits.value = state.resetCredits
       } catch {
         // Keep the last known rate-limit state if the endpoint is temporarily unavailable.
       } finally {
@@ -2274,6 +2280,39 @@ export function useDesktopState() {
     })()
 
     await rateLimitRefreshPromise
+  }
+
+  async function consumeBankedRateLimitReset(creditId?: string): Promise<void> {
+    if (isConsumingRateLimitReset.value) return
+    isConsumingRateLimitReset.value = true
+    rateLimitResetNotice.value = null
+    try {
+      const outcome = await consumeRateLimitResetCredit(creditId)
+      if (outcome === 'reset' || outcome === 'alreadyRedeemed') {
+        rateLimitResetNotice.value = {
+          type: 'success',
+          text: 'Rate limits reset. Your quota and banked-reset balance were refreshed.',
+        }
+      } else if (outcome === 'nothingToReset') {
+        rateLimitResetNotice.value = {
+          type: 'info',
+          text: 'No eligible Codex rate-limit window can be reset right now.',
+        }
+      } else {
+        rateLimitResetNotice.value = {
+          type: 'error',
+          text: 'No banked rate-limit resets are available.',
+        }
+      }
+      await refreshRateLimits()
+    } catch (unknownError) {
+      rateLimitResetNotice.value = {
+        type: 'error',
+        text: unknownError instanceof Error ? unknownError.message : 'Failed to use the banked rate-limit reset.',
+      }
+    } finally {
+      isConsumingRateLimitReset.value = false
+    }
   }
 
   function scheduleRateLimitRefresh(): void {
@@ -6033,6 +6072,9 @@ export function useDesktopState() {
     codexCliMissingError,
     installedSkills,
     accountRateLimitSnapshots,
+    rateLimitResetCredits,
+    isConsumingRateLimitReset,
+    rateLimitResetNotice,
     messages,
     hasMoreOlderMessages,
     isLoadingThreads,
@@ -6046,6 +6088,7 @@ export function useDesktopState() {
 
     error,
     refreshAll,
+    consumeBankedRateLimitReset,
     refreshSkills,
     selectThread,
     loadMessages,

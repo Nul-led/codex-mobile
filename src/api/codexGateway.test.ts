@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   clearThreadGoal,
   compactThread,
+  consumeRateLimitResetCredit,
+  getAccountRateLimitsState,
   getAvailableModelIds,
   getAvailableModels,
   getThreadDetail,
@@ -124,6 +126,78 @@ describe('thread compaction RPC', () => {
     expect(requests).toEqual([
       { method: 'thread/compact/start', params: { threadId: 'thread-compact' } },
     ])
+  })
+})
+
+describe('banked rate-limit resets', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('preserves the authoritative reset count and optional credit details', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { method: string }
+      expect(request.method).toBe('account/rateLimits/read')
+      return new Response(JSON.stringify({
+        result: {
+          rateLimits: {
+            limitId: 'codex',
+            primary: { usedPercent: 75, windowDurationMins: 300, resetsAt: 1780000000 },
+          },
+          rateLimitResetCredits: {
+            availableCount: 2,
+            credits: [{
+              id: 'RateLimitResetCredit_1',
+              resetType: 'codexRateLimits',
+              status: 'available',
+              grantedAt: 1779000000,
+              expiresAt: 1781000000,
+              title: 'Full reset',
+              description: 'Reset an eligible Codex rate-limit window.',
+            }],
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(getAccountRateLimitsState()).resolves.toMatchObject({
+      codexSnapshot: {
+        limitId: 'codex',
+        primary: { usedPercent: 75 },
+      },
+      snapshots: [{ limitId: 'codex' }],
+      resetCredits: {
+        availableCount: 2,
+        credits: [{
+          id: 'RateLimitResetCredit_1',
+          title: 'Full reset',
+          expiresAt: 1781000000,
+        }],
+      },
+    })
+  })
+
+  it('uses the selected opaque credit ID and caller-provided idempotency key', async () => {
+    const requests: Array<{ method: string; params: Record<string, unknown> }> = []
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)) as { method: string; params: Record<string, unknown> })
+      return new Response(JSON.stringify({ result: { outcome: 'reset' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(consumeRateLimitResetCredit('RateLimitResetCredit_1', 'reset-attempt-1')).resolves.toBe('reset')
+    expect(requests).toEqual([{
+      method: 'account/rateLimitResetCredit/consume',
+      params: {
+        idempotencyKey: 'reset-attempt-1',
+        creditId: 'RateLimitResetCredit_1',
+      },
+    }])
   })
 })
 

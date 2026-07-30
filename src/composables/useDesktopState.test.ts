@@ -14,8 +14,10 @@ import type { WorkspaceRootsState } from '../api/codexGateway'
 const gatewayMocks = vi.hoisted(() => ({
   archiveThread: vi.fn(),
   compactThread: vi.fn(),
+  consumeRateLimitResetCredit: vi.fn(),
   forkThread: vi.fn(),
   getAccountRateLimits: vi.fn(),
+  getAccountRateLimitsState: vi.fn(),
   getAvailableCollaborationModes: vi.fn(),
   getAvailableModelIds: vi.fn(),
   getCurrentModelConfig: vi.fn(),
@@ -91,10 +93,56 @@ beforeEach(() => {
   gatewayMocks.getThreadGoal.mockResolvedValue(null)
   gatewayMocks.getThreadTitleCache.mockResolvedValue({ titles: {} })
   gatewayMocks.getWorkspaceRootsState.mockRejectedValue(new Error('no workspace roots state'))
+  gatewayMocks.getAccountRateLimitsState.mockResolvedValue({
+    codexSnapshot: null,
+    snapshots: [],
+    resetCredits: null,
+  })
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('banked rate-limit resets', () => {
+  it('uses a selected reset and refreshes the authoritative balance and quota', async () => {
+    gatewayMocks.consumeRateLimitResetCredit.mockResolvedValue('reset')
+    gatewayMocks.getAccountRateLimitsState.mockResolvedValue({
+      codexSnapshot: {
+        limitId: 'codex',
+        limitName: null,
+        primary: { usedPercent: 0, windowDurationMins: 300, windowMinutes: 300, resetsAt: 1780000000 },
+        secondary: null,
+        credits: null,
+        planType: 'pro',
+      },
+      snapshots: [{
+        limitId: 'codex',
+        limitName: null,
+        primary: { usedPercent: 0, windowDurationMins: 300, windowMinutes: 300, resetsAt: 1780000000 },
+        secondary: null,
+        credits: null,
+        planType: 'pro',
+      }],
+      resetCredits: {
+        availableCount: 1,
+        credits: null,
+      },
+    })
+
+    const state = useDesktopState()
+    await state.consumeBankedRateLimitReset('RateLimitResetCredit_1')
+
+    expect(gatewayMocks.consumeRateLimitResetCredit).toHaveBeenCalledWith('RateLimitResetCredit_1')
+    expect(gatewayMocks.getAccountRateLimitsState).toHaveBeenCalledTimes(1)
+    expect(state.rateLimitResetCredits.value?.availableCount).toBe(1)
+    expect(state.codexQuota.value?.primary?.usedPercent).toBe(0)
+    expect(state.rateLimitResetNotice.value).toEqual({
+      type: 'success',
+      text: 'Rate limits reset. Your quota and banked-reset balance were refreshed.',
+    })
+    expect(state.isConsumingRateLimitReset.value).toBe(false)
+  })
 })
 
 describe('filterGroupsByWorkspaceRoots', () => {
