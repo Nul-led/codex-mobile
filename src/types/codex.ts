@@ -2,9 +2,22 @@ export type RpcEnvelope<T> = {
   result: T
 }
 
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 export type SpeedMode = 'standard' | 'fast'
 export type CollaborationModeKind = 'default' | 'plan'
+
+export type UiReasoningEffortOption = {
+  value: ReasoningEffort
+  description: string
+}
+
+export type UiModelOption = {
+  id: string
+  displayName: string
+  description: string
+  supportedReasoningEfforts: UiReasoningEffortOption[]
+  defaultReasoningEffort: ReasoningEffort | ''
+}
 
 export type ThreadGoalStatus = 'active' | 'paused' | 'blocked' | 'usageLimited' | 'budgetLimited' | 'complete'
 

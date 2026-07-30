@@ -3,6 +3,7 @@ import {
   clearThreadGoal,
   compactThread,
   getAvailableModelIds,
+  getAvailableModels,
   getThreadDetail,
   getThreadGoal,
   listDirectoryComposioConnectors,
@@ -237,6 +238,45 @@ describe('getAvailableModelIds', () => {
       includeProviderModels: true,
     })).resolves.toEqual(['gpt-5.5', 'gpt-5.4-mini'])
     expect(requests).toEqual(['/codex-api/provider-models', '/codex-api/rpc'])
+  })
+
+  it('preserves server-provided reasoning effort order including max and ultra', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = typeof init?.body === 'string'
+        ? JSON.parse(init.body) as { method: string }
+        : { method: '' }
+      expect(body.method).toBe('model/list')
+      return new Response(JSON.stringify({
+        result: {
+          data: [{
+            id: 'gpt-5.6-sol',
+            displayName: 'GPT-5.6 Sol',
+            description: 'Frontier coding model',
+            supportedReasoningEfforts: [
+              { reasoningEffort: 'low', description: 'Fast' },
+              { reasoningEffort: 'max', description: 'Deep' },
+              { reasoningEffort: 'ultra', description: 'Deepest' },
+            ],
+            defaultReasoningEffort: 'low',
+          }],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    await expect(getAvailableModels({ includeProviderModels: false })).resolves.toEqual([{
+      id: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6 Sol',
+      description: 'Frontier coding model',
+      supportedReasoningEfforts: [
+        { value: 'low', description: 'Fast' },
+        { value: 'max', description: 'Deep' },
+        { value: 'ultra', description: 'Deepest' },
+      ],
+      defaultReasoningEffort: 'low',
+    }])
   })
 })
 

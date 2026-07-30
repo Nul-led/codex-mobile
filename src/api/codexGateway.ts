@@ -12,7 +12,6 @@ import type {
   ConfigReadResponse,
   GetAccountRateLimitsResponse,
   ModelListResponse,
-  ReasoningEffort,
   ThreadForkResponse,
   ThreadListResponse,
   ThreadReadResponse,
@@ -30,6 +29,7 @@ import {
 } from './normalizers/v2'
 import type {
   SpeedMode,
+  ReasoningEffort,
   UiAccountEntry,
   UiAccountQuotaStatus,
   UiAccountUnavailableReason,
@@ -57,6 +57,8 @@ import type {
   UiRateLimitWindow,
   UiThreadAutomation,
   UiThreadAutomationStatus,
+  UiModelOption,
+  UiReasoningEffortOption,
 } from '../types/codex'
 import { normalizePathForUi } from '../pathUtils.js'
 
@@ -608,6 +610,29 @@ export async function clearThreadGoal(threadId: string): Promise<boolean> {
   return payload.cleared === true
 }
 
+export type ChatGptProHandoff = {
+  markdown: string
+  chatgptUrl: string
+}
+
+export async function createChatGptProHandoff(threadId: string, cwd: string): Promise<ChatGptProHandoff> {
+  const response = await fetch('/codex-api/thread/pro-handoff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ threadId, cwd }),
+  })
+  const payload = await response.json() as { data?: Partial<ChatGptProHandoff>; error?: unknown }
+  if (!response.ok) {
+    throw new Error(extractErrorMessage(payload, 'Failed to prepare the ChatGPT Pro handoff'))
+  }
+  const markdown = typeof payload.data?.markdown === 'string' ? payload.data.markdown : ''
+  const chatgptUrl = typeof payload.data?.chatgptUrl === 'string' ? payload.data.chatgptUrl : ''
+  if (!markdown || !chatgptUrl) {
+    throw new Error('The ChatGPT Pro handoff response was incomplete')
+  }
+  return { markdown, chatgptUrl }
+}
+
 function normalizeFallbackFileChange(value: unknown): UiFileChange | null {
   const record = asRecord(value)
   if (!record) return null
@@ -753,7 +778,7 @@ async function enrichThreadMessagesWithFallback(threadId: string, messages: UiMe
 }
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort | '' {
-  const allowed: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+  const allowed: ReasoningEffort[] = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']
   return typeof value === 'string' && allowed.includes(value as ReasoningEffort)
     ? (value as ReasoningEffort)
     : ''
@@ -2093,27 +2118,84 @@ async function fetchProviderModelIds(providerId?: string): Promise<{ ids: string
   return null
 }
 
-export async function getAvailableModelIds(options: { includeProviderModels?: boolean; requireProviderModels?: boolean; providerId?: string } = {}): Promise<string[]> {
+function normalizeModelReasoningEfforts(value: unknown): UiReasoningEffortOption[] {
+  const rows = Array.isArray(value) ? value : []
+  const options: UiReasoningEffortOption[] = []
+  for (const row of rows) {
+    const record = row && typeof row === 'object' && !Array.isArray(row)
+      ? row as Record<string, unknown>
+      : null
+    const effort = normalizeReasoningEffort(record?.reasoningEffort ?? record?.reasoning_effort)
+    if (!effort || options.some((option) => option.value === effort)) continue
+    options.push({
+      value: effort,
+      description: typeof record?.description === 'string' ? record.description.trim() : '',
+    })
+  }
+  return options
+}
+
+export async function getAvailableModels(options: { includeProviderModels?: boolean; requireProviderModels?: boolean; providerId?: string } = {}): Promise<UiModelOption[]> {
   const shouldIncludeProviderModels = options.includeProviderModels !== false
   const providerModels = shouldIncludeProviderModels ? await fetchProviderModelIds(options.providerId) : null
 
   if (providerModels?.exclusive || options.requireProviderModels) {
-    return providerModels?.ids ?? []
+    return (providerModels?.ids ?? []).map((id) => ({
+      id,
+      displayName: '',
+      description: '',
+      supportedReasoningEfforts: [],
+      defaultReasoningEffort: '',
+    }))
   }
 
   const payload = await callRpc<ModelListResponse>('model/list', {})
-  const ids: string[] = []
+  const models: UiModelOption[] = []
   for (const row of payload.data) {
     const candidate = row.id || row.model
-    if (!candidate || ids.includes(candidate)) continue
-    ids.push(candidate)
+    if (!candidate || models.some((model) => model.id === candidate)) continue
+    const rawRow = row as unknown as Record<string, unknown>
+    models.push({
+      id: candidate,
+      displayName: typeof rawRow.displayName === 'string' ? rawRow.displayName.trim() : '',
+      description: typeof rawRow.description === 'string' ? rawRow.description.trim() : '',
+      supportedReasoningEfforts: normalizeModelReasoningEfforts(
+        rawRow.supportedReasoningEfforts ?? rawRow.supported_reasoning_efforts,
+      ),
+      defaultReasoningEffort: normalizeReasoningEffort(
+        rawRow.defaultReasoningEffort ?? rawRow.default_reasoning_effort,
+      ),
+    })
   }
 
-  if (!shouldIncludeProviderModels || !providerModels) return ids
+  if (!shouldIncludeProviderModels || !providerModels) return models
 
   for (const candidate of providerModels.ids) {
-    if (!ids.includes(candidate)) ids.push(candidate)
+    if (models.some((model) => model.id === candidate)) continue
+    models.push({
+      id: candidate,
+      displayName: '',
+      description: '',
+      supportedReasoningEfforts: [],
+      defaultReasoningEffort: '',
+    })
   }
+  return models
+}
+
+export type AvailableModelIdList = string[] & {
+  readonly modelOptions?: UiModelOption[]
+}
+
+export async function getAvailableModelIds(options: { includeProviderModels?: boolean; requireProviderModels?: boolean; providerId?: string } = {}): Promise<AvailableModelIdList> {
+  const models = await getAvailableModels(options)
+  const ids = models.map((model) => model.id) as AvailableModelIdList
+  Object.defineProperty(ids, 'modelOptions', {
+    value: models,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  })
   return ids
 }
 

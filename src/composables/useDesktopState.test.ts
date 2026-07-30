@@ -850,6 +850,60 @@ describe('live error overlay', () => {
 })
 
 describe('provider model selection', () => {
+  it('uses the selected model metadata to expose max and ultra and resets unsupported effort', async () => {
+    installTestWindow()
+    gatewayMocks.getThreadGroupsPage.mockResolvedValue({ groups: [], nextCursor: null })
+    gatewayMocks.getAvailableCollaborationModes.mockResolvedValue([{ value: 'default', label: 'Default' }])
+    gatewayMocks.getSkillsList.mockResolvedValue([])
+    gatewayMocks.getAccountRateLimits.mockResolvedValue(null)
+    gatewayMocks.getCurrentModelConfig.mockResolvedValue({
+      model: 'gpt-5.6-sol',
+      providerId: 'codex',
+      reasoningEffort: 'low',
+      speedMode: 'standard',
+    })
+    const modelIds = ['gpt-5.6-sol', 'gpt-5.4-mini']
+    Object.defineProperty(modelIds, 'modelOptions', {
+      value: [
+        {
+          id: 'gpt-5.6-sol',
+          displayName: 'GPT-5.6 Sol',
+          description: '',
+          supportedReasoningEfforts: [
+            { value: 'low', description: '' },
+            { value: 'max', description: '' },
+            { value: 'ultra', description: '' },
+          ],
+          defaultReasoningEffort: 'low',
+        },
+        {
+          id: 'gpt-5.4-mini',
+          displayName: 'GPT-5.4 mini',
+          description: '',
+          supportedReasoningEfforts: [
+            { value: 'low', description: '' },
+            { value: 'medium', description: '' },
+            { value: 'high', description: '' },
+          ],
+          defaultReasoningEffort: 'medium',
+        },
+      ],
+      enumerable: false,
+    })
+    gatewayMocks.getAvailableModelIds.mockResolvedValue(modelIds)
+
+    const state = useDesktopState()
+    await state.refreshAll({ includeSelectedThreadMessages: false, awaitAncillaryRefreshes: true })
+
+    expect(state.availableReasoningEfforts.value.map((option) => option.value)).toEqual(['low', 'max', 'ultra'])
+    state.setSelectedReasoningEffort('ultra')
+    expect(state.selectedReasoningEffort.value).toBe('ultra')
+
+    state.setSelectedModelIdForThread('', 'gpt-5.4-mini')
+    expect(state.availableReasoningEfforts.value.map((option) => option.value)).toEqual(['low', 'medium', 'high'])
+    expect(state.selectedReasoningEffort.value).toBe('medium')
+  })
+
   it('ignores global selected-model localStorage when OpenCode Zen is the active provider', async () => {
     installTestWindow({
       'codex-web-local.selected-model-by-context.v1': JSON.stringify({
