@@ -13,6 +13,8 @@ import {
   isThreadMaterializationPendingError,
   isThreadNotFoundError,
   isUnauthenticatedRateLimitError,
+  mergeThreadListRowsWithFallback,
+  normalizeStateDbThreadSourceForRead,
   writeFreeModeStateFile,
   writeWorkspaceRootsState,
 } from './codexAppServerBridge'
@@ -25,6 +27,49 @@ afterEach(() => {
   } else {
     process.env.CODEX_HOME = originalCodexHome
   }
+})
+
+describe('thread list relationship metadata', () => {
+  it('decodes subagent sources stored as JSON in the Codex state database', () => {
+    expect(normalizeStateDbThreadSourceForRead('cli')).toBe('cli')
+    expect(normalizeStateDbThreadSourceForRead(JSON.stringify({
+      subagent: {
+        thread_spawn: {
+          parent_thread_id: 'parent-thread',
+          depth: 1,
+        },
+      },
+    }))).toEqual({
+      subagent: {
+        thread_spawn: {
+          parent_thread_id: 'parent-thread',
+          depth: 1,
+        },
+      },
+    })
+  })
+
+  it('keeps app-server relationship metadata when a state DB fallback row has the same id', () => {
+    const source = {
+      subAgent: {
+        thread_spawn: {
+          parent_thread_id: 'parent-thread',
+          depth: 1,
+        },
+      },
+    }
+    const rows = mergeThreadListRowsWithFallback(
+      [{ id: 'child-thread', source, parentThreadId: 'parent-thread', preview: 'child' }],
+      [{ id: 'child-thread', source: 'cli', preview: 'fallback' }],
+    )
+
+    expect(rows).toEqual([{
+      id: 'child-thread',
+      source,
+      parentThreadId: 'parent-thread',
+      preview: 'child',
+    }])
+  })
 })
 
 describe('callRpcWithArchiveRecovery', () => {

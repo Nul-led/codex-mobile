@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeThreadMessagesV2, readThreadInProgressFromResponse } from './v2'
-import type { ThreadReadResponse } from '../appServerDtos'
+import { normalizeThreadGroupsV2, normalizeThreadMessagesV2, readThreadInProgressFromResponse } from './v2'
+import type { Thread, ThreadListResponse, ThreadReadResponse } from '../appServerDtos'
 
 function threadReadResponseWithContent(content: ThreadReadResponse['thread']['turns'][number]['items'][number][]): ThreadReadResponse {
   return {
@@ -24,6 +24,63 @@ function threadReadResponseWithContent(content: ThreadReadResponse['thread']['tu
     },
   }
 }
+
+function threadSummary(id: string, source: Thread['source'] = 'appServer'): Thread {
+  return {
+    id,
+    preview: id,
+    modelProvider: 'openai',
+    createdAt: 1,
+    updatedAt: 2,
+    path: null,
+    cwd: '/tmp/project',
+    cliVersion: 'test',
+    source,
+    gitInfo: null,
+    turns: [],
+  }
+}
+
+describe('normalizeThreadGroupsV2', () => {
+  it('keeps root and forked chats while hiding subagent threads across CLI metadata formats', () => {
+    const root = threadSummary('root')
+    const fork = {
+      ...threadSummary('fork'),
+      forkedFromId: 'root',
+    } as Thread
+    const typedSubAgent = threadSummary('typed-subagent', {
+      subAgent: {
+        thread_spawn: {
+          parent_thread_id: 'root',
+          depth: 1,
+        },
+      },
+    })
+    const legacySubAgent = {
+      ...threadSummary('legacy-subagent'),
+      source: {
+        subagent: {
+          thread_spawn: {
+            parent_thread_id: 'root',
+            depth: 1,
+          },
+        },
+      },
+    } as unknown as Thread
+    const relationshipSubAgent = {
+      ...threadSummary('relationship-subagent', 'cli'),
+      parentThreadId: 'root',
+    } as unknown as Thread
+
+    const payload: ThreadListResponse = {
+      data: [root, fork, typedSubAgent, legacySubAgent, relationshipSubAgent],
+      nextCursor: null,
+    }
+
+    expect(normalizeThreadGroupsV2(payload).flatMap((group) => group.threads.map((thread) => thread.id)))
+      .toEqual(['root', 'fork'])
+  })
+})
 
 describe('normalizeThreadMessagesV2', () => {
   it('preserves selected skill inputs on the rendered user message', () => {

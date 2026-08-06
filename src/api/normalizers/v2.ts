@@ -623,8 +623,27 @@ function groupThreadsByProject(threads: UiThread[]): UiProjectGroup[] {
     })
 }
 
+function hasSubAgentSource(value: unknown): boolean {
+  if (typeof value === 'string') return value.toLowerCase() === 'subagent'
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+
+  const source = value as Record<string, unknown>
+  return 'subAgent' in source || 'subagent' in source
+}
+
+function isSubAgentThread(thread: Thread): boolean {
+  const rawThread = thread as unknown as Record<string, unknown>
+  const parentThreadId = rawThread.parentThreadId ?? rawThread.parent_thread_id
+
+  return (typeof parentThreadId === 'string' && parentThreadId.trim().length > 0)
+    || hasSubAgentSource(rawThread.source)
+    || hasSubAgentSource(rawThread.threadSource)
+}
+
 export function normalizeThreadGroupsV2(payload: ThreadListResponse): UiProjectGroup[] {
-  const uiThreads = payload.data.map(toUiThread)
+  const uiThreads = payload.data
+    .filter((thread) => !isSubAgentThread(thread))
+    .map(toUiThread)
   return groupThreadsByProject(uiThreads)
 }
 

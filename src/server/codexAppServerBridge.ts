@@ -1754,13 +1754,25 @@ LIMIT 200;
         path,
         cwd,
         cliVersion: readNonEmptyString(record?.cli_version),
-        source: 'cli',
+        source: normalizeStateDbThreadSourceForRead(record?.source),
         gitInfo: null,
         turns: [],
       }]
     })
   } catch {
     return []
+  }
+}
+
+export function normalizeStateDbThreadSourceForRead(value: unknown): unknown {
+  const source = readNonEmptyString(value)
+  if (!source) return 'cli'
+
+  try {
+    const parsed = JSON.parse(source) as unknown
+    return typeof parsed === 'string' || asRecord(parsed) ? parsed : source
+  } catch {
+    return source
   }
 }
 
@@ -1813,35 +1825,44 @@ ${archivedPredicate};
   }
 }
 
-function mergeImportedThreadsIntoThreadListResult(result: unknown): unknown {
-  const record = asRecord(result)
-  const data = Array.isArray(record?.data) ? record.data : null
-  if (!record || !data) return result
+export function mergeThreadListRowsWithFallback(
+  data: unknown[],
+  fallbackThreads: Array<Record<string, unknown>>,
+): unknown[] {
   const importedById = new Map<string, Record<string, unknown>>()
-  for (const thread of listImportedThreadsFromStateDb()) {
+  for (const thread of fallbackThreads) {
     const id = readNonEmptyString(thread.id)
     if (id) importedById.set(id, thread)
   }
-  if (importedById.size === 0) return result
+  if (importedById.size === 0) return data
   const mergedData: unknown[] = []
   for (const item of data) {
     const id = readNonEmptyString(asRecord(item)?.id)
     const imported = id ? importedById.get(id) : undefined
     if (imported) {
-      mergedData.push({ ...asRecord(item), ...imported })
+      // App-server rows contain richer relationship metadata. State DB rows
+      // are a fallback for imported sessions and must not overwrite it.
+      mergedData.push({ ...imported, ...asRecord(item) })
       importedById.delete(id)
     } else {
       mergedData.push(item)
     }
   }
   mergedData.push(...importedById.values())
+  return mergedData.sort((a, b) => {
+    const aUpdated = typeof asRecord(a)?.updatedAt === 'number' ? asRecord(a)?.updatedAt as number : 0
+    const bUpdated = typeof asRecord(b)?.updatedAt === 'number' ? asRecord(b)?.updatedAt as number : 0
+    return bUpdated - aUpdated
+  })
+}
+
+function mergeImportedThreadsIntoThreadListResult(result: unknown): unknown {
+  const record = asRecord(result)
+  const data = Array.isArray(record?.data) ? record.data : null
+  if (!record || !data) return result
   return {
     ...record,
-    data: mergedData.sort((a, b) => {
-      const aUpdated = typeof asRecord(a)?.updatedAt === 'number' ? asRecord(a)?.updatedAt as number : 0
-      const bUpdated = typeof asRecord(b)?.updatedAt === 'number' ? asRecord(b)?.updatedAt as number : 0
-      return bUpdated - aUpdated
-    }),
+    data: mergeThreadListRowsWithFallback(data, listImportedThreadsFromStateDb()),
   }
 }
 
